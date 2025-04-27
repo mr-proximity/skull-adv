@@ -647,7 +647,8 @@
             header.addEventListener('click', (e) => {
                 if (e.target.tagName === 'A' && e.target.dataset.mode) {
                      e.preventDefault();
-                     const mode = e.target.dataset.dataset.mode;
+                     // Corrected: Access data-mode directly
+                     const mode = e.target.dataset.mode;
                      // Don't switch mode if clicking the same mode tab that's already active
                      if (mode === currentMode && sidebar.classList.contains('visible')) {
                          closeSidebar();
@@ -699,9 +700,9 @@
 
              } else if (disease) {
                  // Show the disease-specific base image
-                 // Find the image element whose src matches the disease base image
                  // Use the ID we created for disease base images: `${mode}-base`
-                 const diseaseBaseImg = imageElements[`${mode}-base`];
+                 const diseaseBaseImgId = disease.baseImage === DEFAULT_BASE_IMAGE ? BASE_LAYER_ID : `${mode}-base`;
+                 const diseaseBaseImg = imageElements[diseaseBaseImgId];
 
                  if (diseaseBaseImg) {
                      diseaseBaseImg.classList.remove('hidden');
