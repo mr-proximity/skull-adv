@@ -413,6 +413,8 @@
         let currentMode = 'default'; // 'default', 'arthritis', etc.
         let baseImageNaturalWidth = 0;
          let baseImageNaturalHeight = 0;
+         let baseImageLoadedAndSized = false; // Flag to track base image readiness
+
 
         // --- Initialization ---
 
@@ -442,12 +444,25 @@
              loadingProgress.max = assetsToLoad;
 
              if (assetsToLoad === 0) {
-                 setupScene(); // No assets to load? Unlikely but possible
+                 // If somehow no assets, still try to setup scene (though likely won't work)
+                 setupScene();
                  return;
              }
 
              // Create base layer img element first
-             createLayerElement({ id: BASE_LAYER_ID, src: DEFAULT_BASE_IMAGE, name: 'Base Body', interactive: false, zIndex: 0 });
+             const baseImgElement = createLayerElement({ id: BASE_LAYER_ID, src: DEFAULT_BASE_IMAGE, name: 'Base Body', interactive: false, zIndex: 0 });
+
+             // Add a specific listener for the base image to ensure dimensions are available
+             baseImgElement.onload = () => {
+                 console.log(`Base image ${DEFAULT_BASE_IMAGE} dimensions available.`);
+                 baseImageLoadedAndSized = true;
+                 assetLoadHandler(DEFAULT_BASE_IMAGE); // Also count as a general asset loaded
+             };
+             baseImgElement.onerror = () => {
+                 showError(`Failed to load default base image: ${DEFAULT_BASE_IMAGE}. Interaction may be disabled.`, true);
+                 assetErrorHandler(DEFAULT_BASE_IMAGE); // Count as loaded (failed)
+             };
+
 
              // Create elements for skeleton layers
              skeletonLayers.forEach((layer, index) => {
@@ -469,8 +484,12 @@
              });
 
 
-            // Start preloading
-            imageUrls.forEach(url => preloadImage(url));
+            // Start preloading other images (base image onload is handled separately above)
+            imageUrls.forEach(url => {
+                if (url !== DEFAULT_BASE_IMAGE) {
+                    preloadImage(url);
+                }
+            });
         }
 
          function createLayerElement(layerData) {
@@ -488,6 +507,7 @@
              }
              imageElements[layerData.id] = img; // Store reference by layer ID
              container.appendChild(img);
+             img.src = layerData.src; // Set src here
 
              // Add hit canvas only for interactive skeleton layers in default mode
              // Disease specific layers might also be interactive, but their hit detection
@@ -501,6 +521,7 @@
                  canvasElements[layerData.id] = canvas;
                  container.appendChild(canvas);
              }
+             return img; // Return the created image element
          }
 
         function preloadImage(url) {
@@ -534,13 +555,15 @@
 
 
         function checkAllAssetsLoaded() {
-            if (assetsLoaded === assetsToLoad) {
-                console.log("All assets processed. Setting up scene.");
-                // Set the src for the already created img elements *after* loading
-                 // The src is already set during createLayerElement, but ensuring they are
-                 // fully loaded before setupScene is the key.
+            // Check if all assets *reported* as loaded AND the base image dimensions are available
+            if (assetsLoaded === assetsToLoad && baseImageLoadedAndSized) {
+                console.log("All assets processed and base image sized. Setting up scene.");
                  // Wait briefly for images to render from cache before setup
                   setTimeout(setupScene, 100);
+            } else if (assetsLoaded === assetsToLoad && !baseImageLoadedAndSized) {
+                 console.warn("All assets reported loaded, but base image dimensions not yet available. Waiting...");
+                 // If all assets are reported loaded but base image isn't sized, wait a bit longer
+                 setTimeout(checkAllAssetsLoaded, 50); // Re-check after a small delay
             }
         }
 
@@ -548,10 +571,12 @@
             console.log("Setting up scene...");
             const baseImg = imageElements[BASE_LAYER_ID];
 
-            if (!baseImg || !baseImg.complete || baseImg.naturalWidth === 0) {
-                 showError("Default base image missing or invalid after loading. Cannot initialize interaction.", true);
-                 // Continue without interaction if base image fails
+            // Final check for base image readiness
+            if (!baseImg || baseImg.naturalWidth === 0 || baseImg.naturalHeight === 0) {
+                 showError("Default base image dimensions not available. Cannot initialize interaction.", true);
                  loadingIndicator.style.display = 'none';
+                 // Still attempt to set mode to default to show what can be loaded
+                 setMode('default');
                  return;
              }
 
@@ -622,7 +647,7 @@
             header.addEventListener('click', (e) => {
                 if (e.target.tagName === 'A' && e.target.dataset.mode) {
                      e.preventDefault();
-                     const mode = e.target.dataset.mode;
+                     const mode = e.target.dataset.dataset.mode;
                      // Don't switch mode if clicking the same mode tab that's already active
                      if (mode === currentMode && sidebar.classList.contains('visible')) {
                          closeSidebar();
@@ -655,7 +680,7 @@
               Object.values(imageElements).forEach(img => img.classList.remove('interactive'));
 
 
-             if (mode === 'default') {
+             if (mode === 'default' || mode === 'about') { // 'about' also shows default view
                  // Show default base image
                  const defaultBaseImg = imageElements[BASE_LAYER_ID];
                  if (defaultBaseImg) defaultBaseImg.classList.remove('hidden');
@@ -675,11 +700,13 @@
              } else if (disease) {
                  // Show the disease-specific base image
                  // Find the image element whose src matches the disease base image
-                 const diseaseBaseImg = Object.values(imageElements).find(img => img.src.endsWith(disease.baseImage));
+                 // Use the ID we created for disease base images: `${mode}-base`
+                 const diseaseBaseImg = imageElements[`${mode}-base`];
+
                  if (diseaseBaseImg) {
                      diseaseBaseImg.classList.remove('hidden');
                  } else {
-                     console.warn(`Disease base image not found for mode: ${mode}`);
+                     console.warn(`Disease base image element not found for mode: ${mode}. Falling back to default base.`);
                      // Fallback: show default base if disease base not found
                       const defaultBaseImg = imageElements[BASE_LAYER_ID];
                       if (defaultBaseImg) defaultBaseImg.classList.remove('hidden');
@@ -693,14 +720,13 @@
                          img.classList.remove('hidden');
                          // Could add interactive class here if disease layers should be clickable
                      } else {
-                         console.warn(`Disease extra layer image not found: ${l.id}`);
+                         console.warn(`Disease extra layer image element not found: ${l.id}`);
                      }
                  });
 
                  // For disease modes (except 'about'), open the sidebar with relevant info
-                 if (mode !== 'about') {
-                     showSidebar(disease.name, disease.popupImage, disease.info, disease.links);
-                 }
+                 // 'about' mode is handled above to show default view
+                 showSidebar(disease.name, disease.popupImage, disease.info, disease.links);
 
              }
 
@@ -728,8 +754,9 @@
 
              const rect = container.getBoundingClientRect();
              // Scale coordinates to the natural size of the base image (which dictates container size)
-             // Use the current visible base image to determine scaling
-             const currentBaseImg = Object.values(imageElements).find(img => !img.classList.contains('hidden') && (img.id === BASE_LAYER_ID || Object.values(diseaseInfo).some(d => img.src.endsWith(d.baseImage))));
+             // Use the default base image for scaling in default mode
+             const currentBaseImg = imageElements[BASE_LAYER_ID];
+
 
              if (!currentBaseImg || currentBaseImg.naturalWidth === 0) {
                  console.warn("Could not determine current base image for interaction scaling.");
